@@ -1,0 +1,10 @@
+{
+  "name": "sigcrew",
+  "owner": {
+    "name": "sigcrew"
+  },
+  "metadata": {
+    "description": "sigcrew Claude Code plugin marketplace"
+  },
+  "plugins": []
+}
