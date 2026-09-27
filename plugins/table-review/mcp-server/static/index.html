@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">Review</h1>
+    <span id="counts"></span>
+    <div class="toggle" role="group" aria-label="보기 전환">
+      <button type="button" id="view-table" aria-pressed="true">테이블</button>
+      <button type="button" id="view-preview" aria-pressed="false">미리보기</button>
+    </div>
+    <span class="spacer"></span>
+    <button type="button" id="cancel">취소</button>
+    <button type="button" id="submit" class="primary" title="Cmd/Ctrl+Enter">리뷰 제출</button>
+  </header>
+  <div id="error" role="alert" hidden></div>
+
+  <div id="layout">
+    <main id="main">
+      <div id="table-view" class="pane">
+        <table>
+          <colgroup><col class="c-num"><col class="c-type"><col><col class="c-status"></colgroup>
+          <thead><tr><th scope="col">#</th><th scope="col">타입</th><th scope="col">내용</th><th scope="col">상태</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div id="preview-view" class="pane markdown" hidden></div>
+      <div id="action-bar" class="actions floating" hidden>
+        <span id="sel-count"></span>
+        <button type="button" data-type="comment"><kbd>1</kbd> 코멘트</button>
+        <button type="button" data-type="question"><kbd>2</kbd> 질문</button>
+        <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
+      </div>
+    </main>
+    <div id="splitter" role="separator" aria-orientation="vertical" aria-label="사이드바 너비 조절" tabindex="0"></div>
+    <aside id="sidebar" aria-label="리뷰 항목">
+      <section id="q-section" class="side-section" aria-labelledby="q-title">
+        <h2 id="q-title">질문 <span id="q-count" class="count">0</span></h2>
+        <div class="side-scroll">
+          <div id="q-editor" class="editor-slot"></div>
+          <div id="q-cards"></div>
+          <p id="q-empty" class="empty">행이나 텍스트를 선택하고 <kbd>2</kbd> 를 눌러 질문하세요. 답변을 읽은 뒤 코멘트를 남길 수 있습니다.</p>
+        </div>
+      </section>
+      <div id="hsplitter" role="separator" aria-orientation="horizontal" aria-label="질문 영역 높이 조절" tabindex="0"></div>
+      <section id="c-section" class="side-section" aria-labelledby="c-title">
+        <h2 id="c-title">코멘트 · 수정 요청 <span id="c-count" class="count">0</span></h2>
+        <div class="side-scroll">
+          <div id="c-editor" class="editor-slot"></div>
+          <div id="c-cards"></div>
+          <p id="c-empty" class="empty">행이나 텍스트를 선택하고 <kbd>1</kbd> 코멘트, <kbd>3</kbd> 수정 요청을 추가하세요.</p>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="float-bar" class="actions floating" hidden>
+    <button type="button" data-type="comment"><kbd>1</kbd> 코멘트</button>
+    <button type="button" data-type="question"><kbd>2</kbd> 질문</button>
+    <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
+  </div>
+
+  <div id="done" hidden><p>제출 완료, 이 탭을 닫아도 됩니다</p></div>
+
+  <script src="marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

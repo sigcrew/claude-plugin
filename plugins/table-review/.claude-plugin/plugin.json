@@ -1,0 +1,11 @@
+{
+  "name": "table-review",
+  "description": "Table-first interactive markdown review in the browser: click rows to comment, ask questions answered within seconds, or request changes",
+  "version": "0.1.0",
+  "author": {
+    "name": "sigcrew"
+  },
+  "license": "MIT",
+  "keywords": ["review", "markdown", "interactive", "web-ui", "feedback"],
+  "repository": "https://github.com/sigcrew/claude-plugin"
+}
