@@ -88,7 +88,10 @@ claude plugin marketplace remove sigcrew
 | `/mcp`에서 `table_review`가 실패로 표시됨 | `uv --version`이 동작하는지 확인합니다. 설치 직후라면 터미널을 새로 열고 Claude Code를 재시작합니다. |
 | `/table-review:review`가 목록에 없음 | 설치 후 Claude Code를 재시작했는지 확인합니다. |
 | 브라우저가 열리지 않음 | 기본 브라우저가 설정되어 있는지 확인합니다. SSH 등 화면이 없는 환경에서는 쓸 수 없습니다. |
-| 탭을 닫았더니 Claude가 계속 기다림 | Claude Code에서 Esc로 도구 호출을 중단합니다. |
+| 브라우저 탭이 보이지 않음 | Claude가 출력한 페이지 주소를 직접 엽니다. 주소의 `?token=` 부분까지 포함해야 합니다. |
+| 페이지에 HTTP 403이 표시됨 | 주소에 `?token=`이 빠진 경우입니다. Claude가 출력한 주소 전체를 사용합니다. |
+| 페이지가 열리는 데 1분 이상 걸림 | 파일로 저장된 문서는 `/table-review:review <파일 경로>`로 열면 바로 열립니다. 대화에만 있는 내용은 Claude가 본문을 다시 출력해야 해서 오래 걸립니다. |
+| 탭을 닫았더니 Claude가 계속 기다림 | Claude가 출력한 주소를 다시 열거나, Claude Code에서 Esc로 대기를 중단합니다. |
 | 질문 답변이 매번 30초 넘게 걸림 | 빠른 답변이 실패해 깊이 조사로 넘어가는 상태입니다. 터미널에서 `claude --version`이 동작하는지 확인합니다. |
 
 ## 개발
@@ -106,7 +109,7 @@ claude --plugin-dir plugins/table-review
 ```bash
 claude plugin validate --strict .
 claude plugin validate --strict plugins/table-review
-cd plugins/table-review/mcp-server && uv run test_server.py
+cd plugins/table-review/mcp-server && uv run test_server.py && python3 test_lifecycle.py
 ```
 
 ### 플러그인 추가

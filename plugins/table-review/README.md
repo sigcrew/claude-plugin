@@ -14,7 +14,9 @@ Requires [uv](https://docs.astral.sh/uv/). Quick answers also need the `claude` 
 
 ## Use
 
-Say "review this", "검토해줘", or run `/table-review:review`. A browser tab opens.
+Say "review this", "검토해줘", or run `/table-review:review <file>`. A browser tab opens and Claude also prints the page address, in case the tab did not come to the front.
+
+A file on disk opens in seconds, because the server reads it directly. Text that exists only in the conversation takes longer, since Claude has to write it out again: about a minute for 10,000 characters.
 
 | Do this | To |
 |---------|----|
@@ -55,12 +57,23 @@ The theme follows the system setting. Drag the dividers to resize the sidebar an
 | `TABLE_REVIEW_MODEL` | `sonnet` | Model for quick answers. |
 | `TABLE_REVIEW_QUICK_TIMEOUT` | `60` | Seconds before a quick answer gives up and the question goes to deep investigation. |
 | `TABLE_REVIEW_CLAUDE_CMD` | `claude` | Command used for quick answers. Use an absolute path. |
+| `TABLE_REVIEW_CONTEXT_WAIT` | `45` | Seconds a question waits for Claude's background summary before it is answered without it. |
+| `TABLE_REVIEW_BROWSER` | platform opener | Command that opens the page. The address is appended. Defaults to `open` (macOS), `xdg-open` (Linux), `start` (Windows). The `BROWSER` variable is ignored. |
 | `TABLE_REVIEW_NO_BROWSER` | unset | Set to `1` to skip opening the browser (tests). |
+
+## When a review ends
+
+| Event | What happens |
+|-------|--------------|
+| `리뷰 제출` or `취소` | The page closes and its address stops working. Claude gets the result |
+| The Claude Code session ends | The review server exits within a few seconds and the page shows that the session ended. Cards stay on screen so you can copy your text |
+| The wait is interrupted in Claude Code | The page stays open. Claude picks the review back up when it waits again |
+| A second review is requested | The open review is kept. Claude reopens it instead of replacing it, unless you ask for a fresh one |
 
 ## Limitations
 
 - Cards live in the browser tab's memory. The browser warns before a reload or tab close, but leaving anyway discards them.
-- Closing the tab without submitting leaves Claude waiting. Interrupt the tool call in Claude Code, or set `TABLE_REVIEW_TIMEOUT`.
+- Closing the tab without submitting leaves Claude waiting. Reopen the address Claude printed, or interrupt the wait in Claude Code.
 - Quick answers cannot see your conversation or your files, so they can be wrong or shallow. Use `깊이 조사` when the answer matters.
 - Quick answers start `claude` without your settings files. If your login depends on them (for example a custom API endpoint configured in `settings.json`), the quick call fails and every question takes the deep path.
 - Ctrl+click was tested on macOS only.
@@ -69,7 +82,7 @@ The theme follows the system setting. Drag the dividers to resize the sidebar an
 
 ```bash
 claude --plugin-dir plugins/table-review
-cd plugins/table-review/mcp-server && uv run test_server.py
+cd plugins/table-review/mcp-server && uv run test_server.py && python3 test_lifecycle.py
 ```
 
 Bump `version` in `.claude-plugin/plugin.json` when behavior changes.

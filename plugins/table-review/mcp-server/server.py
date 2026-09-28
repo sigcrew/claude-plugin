@@ -7,9 +7,10 @@ Table Review MCP Server
 
 Forked from interactive-review by Team Attention (MIT).
 
-Provides two tools:
+Provides three tools:
 - start_review: serves a table-based review UI on localhost, opens the browser
-  and blocks until the user asks for a deep investigation, submits, or cancels.
+  and returns the URL at once.
+- wait_review: blocks until the user asks for a deep investigation, submits, or cancels.
 - answer_question: delivers deep answers to the browser and blocks again.
 
 Questions get a quick answer from a headless `claude -p` child, streamed to the
@@ -21,11 +22,14 @@ import json
 import os
 import secrets
 import shlex
+import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -46,7 +50,12 @@ STATIC_FILES = {
     "/marked.min.js": ("marked.min.js", "text/javascript; charset=utf-8"),
 }
 MAX_BODY = 5 * 1024 * 1024
+MAX_FILE = 2 * 1024 * 1024
 MAX_QUICK_CHILDREN = 4
+OPENED_NEXT = ("Tell the user the page is open and give them the url in case it did not appear. "
+               "Then call wait_review with the background context.")
+UNDELIVERED_NEXT = ("This is the result of the previous review, which was never collected. "
+                    "Process it first, then call start_review again.")
 QUESTION_NEXT = ("The user asked for a deeper investigation of these questions. Investigate each "
                  "(use a subagent; build on quick_answer when present), then call answer_question "
                  "with the answers to deliver them and keep the review open.")
@@ -85,6 +94,68 @@ def env_float(name: str, default: float) -> float:
         return default
 
 
+def read_review_file(file_path: str) -> str:
+    """Text of a UTF-8 file to review; raises ValueError with a message for the model."""
+    path = Path(file_path)
+    if not path.is_absolute():
+        # The server runs in its own mcp-server/ directory, not the user's project.
+        raise ValueError(f"file_path must be an absolute path, got: {file_path}")
+    try:
+        # Follows symlinks. Checked before opening: a FIFO would block open(), /dev/zero never ends.
+        mode = path.stat().st_mode
+        if stat.S_ISDIR(mode):
+            raise ValueError(f"file_path is a directory: {file_path}")
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"file_path is not a regular file: {file_path}")
+        with path.open("rb") as f:
+            data = f.read(MAX_FILE + 1)  # st_size can lie; judge by what was read
+        if len(data) > MAX_FILE:
+            raise ValueError(f"file is larger than 2 MB: {file_path}")
+    except FileNotFoundError:
+        raise ValueError(f"file not found: {file_path}") from None
+    except OSError as e:
+        raise ValueError(f"cannot read file: {file_path}: {e.strerror or e}") from None
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValueError(f"file is not UTF-8 text: {file_path}") from None
+    if not text.strip():
+        raise ValueError(f"file is empty: {file_path}")
+    return text
+
+
+def browser_command(url: str) -> list[str] | None:
+    """argv that opens url, or None when no platform opener exists. Ignores $BROWSER on purpose."""
+    custom = os.environ.get("TABLE_REVIEW_BROWSER")
+    if custom:
+        return [*shlex.split(custom), url]
+    if sys.platform == "darwin":
+        cmd = ["open", url]
+    elif sys.platform == "win32":
+        cmd = ["cmd", "/c", "start", "", url]
+    else:
+        cmd = ["xdg-open", url]
+    return cmd if shutil.which(cmd[0]) else None
+
+
+def open_browser(url: str) -> str:
+    """Returns "opened", "failed" or "skipped". Nothing may reach stdout: it carries MCP messages."""
+    if os.environ.get("TABLE_REVIEW_NO_BROWSER") == "1":
+        return "skipped"
+    cmd = browser_command(url)
+    if cmd is None:
+        return "opened" if webbrowser.open(url) else "failed"
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        return "failed"
+    try:
+        return "opened" if proc.wait(1) == 0 else "failed"
+    except subprocess.TimeoutExpired:
+        return "opened"  # still running: assume it is handing the URL over
+
+
 def kill(proc: subprocess.Popen):
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -95,21 +166,26 @@ def kill(proc: subprocess.Popen):
 class Session:
     """One review: shared between HTTP handler threads, quick-answer threads and the blocking tool call."""
 
-    def __init__(self, content: str, title: str, context: str = ""):
+    def __init__(self, content: str, title: str, file_path: str | None = None):
         self.content = content
         self.title = title
-        self.context = context  # only used in quick-answer prompts, never served over HTTP
+        self.file_path = file_path
+        # Set by wait_review; None until then. Only used in quick-answer prompts, never served over HTTP.
+        self.context: str | None = None
         self.token = secrets.token_urlsafe()
         self.cond = threading.Condition()
         self.questions: dict[str, dict] = {}
         self.pending: list[str] = []     # question ids queued for the main session
         self.result: dict | None = None  # submit body
         self.closed = False
+        self.waiter = 0  # id of the one tool call allowed to take the next event
+        self.taken = False  # the result went to exactly one tool call
         self.slots = threading.Semaphore(MAX_QUICK_CHILDREN)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), ReviewHTTPHandler)
         self.httpd.session = self
         self.port = self.httpd.server_address[1]
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.url = f"http://localhost:{self.port}/?token={self.token}"
+        threading.Thread(target=self.httpd.serve_forever, args=(0.1,), daemon=True).start()
 
     def shutdown(self):
         with self.cond:
@@ -131,7 +207,7 @@ class Session:
                 return
             self.questions[question["id"]] = {
                 **question,
-                "quick": {"text": "", "done": False, "failed": False},
+                "quick": {"text": "", "done": False, "failed": False, "held": False},
                 "deep": {"state": "none", "text": ""},
                 "reason": "", "error": "", "proc": None, "stopped": False,
             }
@@ -161,6 +237,14 @@ class Session:
         return True
 
     def quick_answer(self, qid: str):
+        with self.cond:
+            q = self.questions[qid]
+            if self.context is None:
+                # The page opens before the model sends the background; give it a moment to arrive.
+                q["quick"]["held"] = True
+                self.cond.wait_for(lambda: self.context is not None or self.closed or q["stopped"],
+                                   env_float("TABLE_REVIEW_CONTEXT_WAIT", 45))
+                q["quick"]["held"] = False
         with self.slots:
             q = self.questions[qid]
             if self.closed or q["stopped"]:
@@ -244,12 +328,21 @@ class Session:
 
     # ---------- blocking tool side ----------
 
-    def wait_event(self, timeout: float | None) -> dict[str, Any]:
-        """Block until a submit, deep-investigation requests, timeout, or shutdown."""
+    def wait(self, waiter: int, timeout: float | None):
+        """Runs in a worker thread: block until there is an event, or this waiter was replaced."""
         with self.cond:
-            ready = self.cond.wait_for(
-                lambda: self.closed or self.result is not None or self.pending, timeout)
+            self.cond.wait_for(lambda: self.waiter != waiter or self.closed or self.result is not None
+                               or self.pending, timeout)
+
+    def take(self, waiter: int, timeout: float | None) -> dict[str, Any]:
+        """Consume the next event. Runs on the event loop, so a cancelled call never swallows one."""
+        with self.cond:
+            if self.waiter != waiter:
+                return {"status": "superseded", "message": "A newer call is waiting on this review."}
+            if self.taken:
+                return {"status": "error", "message": "The review result was already delivered."}
             result, closed = self.result, self.closed
+            self.taken = result is not None
             questions = [self.deep_request(self.questions[qid]) for qid in self.pending]
             self.pending = []
         # Submit wins over pending questions.
@@ -260,7 +353,7 @@ class Session:
             return self.submitted(result["items"], result["questions"])
         if closed:
             return {"status": "error", "message": "Review session was closed"}
-        if not ready:
+        if not questions:
             self.shutdown()
             return {"status": "timeout", "message": f"Review timed out after {timeout} seconds"}
         return {"status": "question", "questions": questions, "next": QUESTION_NEXT}
@@ -284,13 +377,16 @@ class Session:
                 sent["answer"], sent["answer_source"] = q["deep"]["text"], "deep"
             elif q and q["quick"]["done"]:
                 sent["answer"], sent["answer_source"] = q["quick"]["text"], "quick"
-        summary = {
+        out = {"status": "submitted", "items": items, "questions": questions}
+        if self.file_path:
+            out["file_path"] = self.file_path
+        out["summary"] = {
             "comments": types.count("comment"),
             "actions": types.count("action"),
             "questions": len(questions),
             "unanswered_questions": sum(1 for q in questions if "answer" not in q),
         }
-        return {"status": "submitted", "items": items, "questions": questions, "summary": summary}
+        return out
 
 
 class ReviewHTTPHandler(BaseHTTPRequestHandler):
@@ -307,7 +403,8 @@ class ReviewHTTPHandler(BaseHTTPRequestHandler):
             return
         elif path == "/api/review":
             s = self.server.session
-            self.send_json(200, {"title": s.title, "content": s.content})
+            self.send_json(200, {"title": s.title, "content": s.content,
+                                 "file": Path(s.file_path).name if s.file_path else ""})
         elif path == "/api/answers":
             self.send_json(200, {"answers": self.server.session.answers()})
         else:
@@ -348,8 +445,14 @@ class ReviewHTTPHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "invalid submit"})
                 return
             with s.cond:
-                s.result = {"status": body["status"], "items": items, "questions": questions}
-                s.cond.notify_all()
+                if s.result is None:
+                    s.result = {"status": body["status"], "items": items, "questions": questions}
+                    s.cond.notify_all()
+            self.send_json(200, {"status": "ok"})
+            # Done: the URL stops working now, not when a tool call picks up the result.
+            # Safe from a handler thread: serve_forever runs in its own thread.
+            s.shutdown()
+            return
         self.send_json(200, {"status": "ok"})
 
     def authorized(self) -> bool:
@@ -404,26 +507,73 @@ def get_timeout() -> float | None:
 
 
 async def wait_next_event(session: Session) -> dict[str, Any]:
-    return await asyncio.get_running_loop().run_in_executor(
-        None, session.wait_event, get_timeout())
-
-
-async def start_review_impl(content: str, title: str = "Review", context: str = "") -> dict[str, Any]:
     global _session
+    with session.cond:
+        session.waiter += 1
+        waiter = session.waiter
+        session.cond.notify_all()  # an older call still waiting returns "superseded"
+    timeout = get_timeout()
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, session.wait, waiter, timeout)
+    except asyncio.CancelledError:
+        # Request cancelled (Esc, background task stopped): free the worker thread,
+        # keep the review open for the next wait_review.
+        with session.cond:
+            if session.waiter == waiter:
+                session.waiter += 1
+                session.cond.notify_all()
+        raise
+    result = session.take(waiter, timeout)
+    if result["status"] not in ("question", "superseded") and _session is session:
+        _session = None
+    return result
+
+
+async def start_review_impl(content: str = "", file_path: str = "", title: str = "",
+                            replace: bool = False) -> dict[str, Any]:
+    global _session
+    if bool(content) == bool(file_path):
+        return {"status": "error", "message": "Pass exactly one of file_path or content."}
+    if _session is not None and _session.result is not None and not _session.taken:
+        # The user finished while nobody was waiting: hand that over before anything replaces it.
+        result = _session.take(_session.waiter, None)
+        _session = None
+        return {"status": "undelivered_result", "result": result, "next": UNDELIVERED_NEXT}
+    if _session is not None and not _session.closed and not replace:
+        return {"status": "already_open", "url": _session.url, "title": _session.title,
+                "next": ("Call wait_review to keep waiting on it. Pass replace: true only if the user "
+                         "wants to discard it: that closes the page they may be using.")}
+    if file_path:
+        try:
+            content = await asyncio.to_thread(read_review_file, file_path)
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}
     if _session is not None:
         _session.shutdown()
-    _session = session = Session(content, title, context)
+    _session = session = Session(content, title or (Path(file_path).name if file_path else "Review"),
+                                 file_path or None)
+    out = {"status": "opened", "url": session.url, "browser": await asyncio.to_thread(open_browser, session.url)}
+    if file_path:
+        out["file_path"] = file_path
+    out["next"] = OPENED_NEXT
+    return out
 
-    url = f"http://localhost:{session.port}/?token={session.token}"
-    if os.environ.get("TABLE_REVIEW_NO_BROWSER") != "1":
-        webbrowser.open(url)
 
+async def wait_review_impl(context: str = "") -> dict[str, Any]:
+    session = _session
+    if session is None:
+        return {"status": "error", "message": "No active review session. Call start_review first."}
+    with session.cond:
+        # Any call counts as "context supplied": held quick answers go ahead.
+        if context or session.context is None:
+            session.context = context
+            session.cond.notify_all()
     return await wait_next_event(session)
 
 
 async def answer_question_impl(answers: list[dict]) -> dict[str, Any]:
     session = _session
-    if session is None or session.closed:
+    if session is None:
         return {"status": "error", "message": "No active review session. Call start_review first."}
     with session.cond:
         for a in answers:
@@ -445,10 +595,12 @@ Blocks until the next event and returns one of:
   answer_question. The review stays open.
 - {"status": "submitted", "items": [...], "questions": [...], "summary": {...}}: the review is done.
   items are what to act on: type comment | action, the target rows, and the user's text.
+  Rows carry startLine/endLine; with file_path they are line numbers in that file.
   questions are reference only: what the user asked while reading, with answer and
   answer_source ("deep" | "quick") when answered.
   summary counts comments, actions, questions, unanswered_questions.
-- {"status": "cancelled"} or {"status": "timeout"}: the review is closed."""
+- {"status": "cancelled"} or {"status": "timeout"}: the review is closed.
+- {"status": "superseded"}: a newer call is waiting on the same review; ignore this one."""
 
 
 @app.list_tools()
@@ -457,31 +609,61 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="start_review",
-            description="""Open a table-based web UI to review markdown content.
+            description="""Open a table-based web UI where the user reviews markdown, and return at once.
+
+Pass exactly one of file_path or content. Prefer file_path whenever the text is a file on disk:
+content makes you re-emit the whole text as output tokens, which takes minutes for long documents.
 
 The user selects rows (or text in the preview) and adds comments, questions,
 or change requests (actions).
+
+Returns {"status": "opened", "url", "browser": "opened" | "failed" | "skipped"}. Give the user
+the url, then call wait_review. If a review is still open this returns {"status": "already_open"}
+and leaves it alone; replace: true discards it and closes its page. If the previous review
+finished while nobody was waiting, this returns {"status": "undelivered_result", "result": {...}}
+instead of opening anything: process that result, then call start_review again.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute path of a UTF-8 markdown file to review"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown content to review, when it is not a file"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title for the review UI (default: the file name, or \"Review\")"
+                    },
+                    "replace": {
+                        "type": "boolean",
+                        "description": "Replace a review that is still open",
+                        "default": False
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="wait_review",
+            description="""Wait for the user's next action in the review opened by start_review.
+
+Pass context on the first call. Quick answers wait for it briefly, so send it right away.
+A review can take a long time: the client may move this call to the background, which is
+expected. Wait for its result; do not call start_review again. If this call is cancelled the
+review stays open: call wait_review again to resume. A result that arrived while nobody was
+waiting is returned at once.
 """ + EVENTS_DESCRIPTION,
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "Markdown content to review (plans, documents, etc.)"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Title for the review UI",
-                        "default": "Review"
-                    },
                     "context": {
                         "type": "string",
                         "description": ("Summary of the reasoning and decisions behind the document. "
-                                        "Used only to answer the user's questions; not shown in the UI."),
-                        "default": ""
+                                        "Used only to answer the user's questions; not shown in the UI.")
                     }
-                },
-                "required": ["content"]
+                }
             }
         ),
         Tool(
@@ -514,8 +696,10 @@ or change requests (actions).
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
     if name == "start_review":
-        result = await start_review_impl(arguments.get("content", ""), arguments.get("title", "Review"),
-                                         arguments.get("context") or "")
+        result = await start_review_impl(arguments.get("content") or "", arguments.get("file_path") or "",
+                                         arguments.get("title") or "", arguments.get("replace") is True)
+    elif name == "wait_review":
+        result = await wait_review_impl(arguments.get("context") or "")
     elif name == "answer_question":
         result = await answer_question_impl(arguments.get("answers") or [])
     else:
@@ -527,19 +711,37 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     )]
 
 
+def exit_now(*_):
+    """Kill quick-answer children and leave at once, whatever threads are still blocked.
+    sys.exit() from a signal handler hung forever: the loop stopped without ending its root
+    task, so anyio's non-daemon worker threads were never told to stop and interpreter
+    shutdown waited on them. That left servers orphaned after the client closed."""
+    if _session is not None:
+        _session.shutdown()
+    os._exit(0)
+
+
+def watch_parent():
+    """Exit when reparented: the launcher (uv, or the client itself) died without closing stdin."""
+    ppid = os.getppid()
+    while os.getppid() == ppid:
+        time.sleep(1)
+    exit_now()
+
+
 def setup_signal_handlers():
     """Set up signal handlers for graceful shutdown."""
-    def handle_shutdown(signum, frame):
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, handle_shutdown)
-    signal.signal(signal.SIGHUP, handle_shutdown)
+    signal.signal(signal.SIGTERM, exit_now)
+    signal.signal(signal.SIGHUP, exit_now)
+    signal.signal(signal.SIGINT, exit_now)
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 async def main():
     """Main entry point."""
     setup_signal_handlers()
+    if os.getppid() != 1:
+        threading.Thread(target=watch_parent, daemon=True).start()
 
     try:
         async with stdio_server() as (read_stream, write_stream):
@@ -551,12 +753,8 @@ async def main():
     except (BrokenPipeError, ConnectionResetError, EOFError):
         # Parent process closed the pipe - exit gracefully
         pass
-    except KeyboardInterrupt:
-        pass
     finally:
-        if _session is not None:
-            _session.shutdown()  # kills quick-answer children
-        sys.exit(0)
+        exit_now()
 
 
 if __name__ == "__main__":

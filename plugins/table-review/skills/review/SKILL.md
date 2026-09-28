@@ -4,6 +4,7 @@ description: |
   Open a browser review UI for a plan or markdown document, where the user clicks table rows (or selects text) to leave comments, ask questions that get answered live, or request changes. Use whenever the user wants to review, check, or give feedback on something you wrote or on a file: "review this", "check this plan", "let me review", "/review", "리뷰", "검토해줘", "피드백 줄게", "이 파일 리뷰해줘: path/to/file.md". Prefer this over asking for feedback in the terminal when the content is longer than a few lines, because the user can point at the exact row they mean.
 allowed-tools:
   - mcp__plugin_table-review_table_review__start_review
+  - mcp__plugin_table-review_table_review__wait_review
   - mcp__plugin_table-review_table_review__answer_question
   - Read
   - Agent
@@ -23,15 +24,26 @@ Questions are a reading aid, not review output. The user asks, reads the answer 
 
 The page answers questions by itself within a few seconds, using a separate quick model call that sees only the document and the `context` you pass. You are involved only when the user presses `깊이 조사` (deep investigation) because the quick answer was not enough.
 
-## 1. Pick the content
+## 1. Open the page first
 
-In priority order:
+The user is waiting for a browser tab, so get it open before doing anything slow. Everything you write into a tool call is generated token by token: passing an 11,000 character document as `content` together with a long background summary once took two minutes before the page appeared.
 
-1. **A file path the user named**: read it with `Read` and pass its contents.
-2. **Content the user pasted or pointed at**: use it as is.
-3. **Otherwise**: the most recent plan or document you produced in this conversation.
+Pick the source in this order:
 
-Pass the markdown unchanged. The UI builds its rows from the markdown structure, so summarizing or reformatting would make row numbers meaningless to the user.
+1. **A file on disk**: pass its absolute path as `file_path`. The server reads the file itself, so the page opens in seconds however long the document is. This covers a file the user named and also a plan or document you already saved to a file earlier in the conversation.
+2. **Text that exists only in the conversation**: pass it as `content`, unchanged. The UI builds its rows from the markdown structure, so summarizing or reformatting would make row numbers meaningless to the user.
+
+Call `start_review` with the source and a short descriptive `title`. It returns immediately:
+
+```json
+{"status": "opened", "url": "http://localhost:57232/?token=...", "browser": "opened"}
+```
+
+Tell the user in one or two lines that the page is open, and include the `url` exactly as returned. The browser does not always come to the front, and the token in the URL is required, so an address without it shows an error. If `browser` is `failed` or `skipped`, say the page did not open by itself and that they need to open the link.
+
+`undelivered_result` means the user finished an earlier review whose result was never collected. The result is in `result`. Handle it as in step 4 first, tell the user you did, and then call `start_review` again for the new review. Skipping it would silently drop a review the user already wrote.
+
+`already_open` means a review is still in progress. Give the user that `url` and continue with `wait_review`. Opening a new review closes the page they may be working in, so pass `replace: true` only when the user asks for a fresh review.
 
 ## 2. Write the context
 
@@ -44,14 +56,16 @@ Write what a reviewer is likely to ask about and the document does not say:
 - relevant facts about the codebase or environment that you found (file names, existing patterns, versions)
 - known risks, open questions, and assumptions
 
-Plain prose or bullets, as long as it needs to be. If you have no background (for example, the user asked you to open a file you know nothing about), say exactly that in `context` so the answerer does not invent reasons.
+Aim for the facts a reviewer would ask about, in compact bullets. The page is already open while you write this, and a question asked before the context arrives is held for it, so length here costs the user waiting time on their first question. If you have no background (for example, the user asked you to open a file you know nothing about), say exactly that so the answerer does not invent reasons.
 
 ## 3. Run the review loop
 
-Call `start_review` with `content`, a short descriptive `title`, and `context`. The call blocks until something happens in the browser, then returns a `status`. Keep going until the status is final:
+Pass the context in the first `wait_review` call. The call blocks until something happens in the browser, then returns a `status`. Keep going until the status is final:
 
 ```
-result = start_review(content, title, context)
+opened = start_review(file_path or content, title)     # returns at once
+tell the user the page is open, with opened.url
+result = wait_review(context)
 while result.status == "question":
     answers = investigate each question in result.questions   (see below)
     result = answer_question(answers)      # delivers answers, then blocks again
@@ -59,6 +73,8 @@ while result.status == "question":
 ```
 
 `answer_question` both delivers the answers and resumes waiting, so always call it after a `question` result. If you stop without calling it, the user is left staring at a spinner in a page that will never update.
+
+A review usually takes longer than two minutes, and the client then moves the waiting call to the background and tells you so. That is the normal case, not a failure. The page is still open and the result arrives as a notification when the user submits. Tell the user you are waiting and end your turn. Do not call `start_review` again, and do not go looking for the server's port or process. If a waiting call was interrupted, call `wait_review` again to pick the review back up; nothing the user did in the page is lost. A result with status `superseded` belongs to an older waiting call that a newer one replaced. Ignore it and keep waiting on the newer call.
 
 ### Deep investigation
 
@@ -94,6 +110,8 @@ Then call `answer_question` with `[{ "question_id": <id>, "answer": <markdown> }
 | `cancelled` | Say the review was cancelled and change nothing |
 | `timeout` / `error` | Report the message and offer to reopen the review |
 
+Once the status is final the page is closed and its address stops working.
+
 A submitted result has two lists:
 
 ```json
@@ -101,8 +119,11 @@ A submitted result has two lists:
  "items": [{"id": "item-5", "type": "action", "rows": [...], "selectedText": "", "text": "Postgres 대신 Redis로 바꿔주세요"}],
  "questions": [{"id": "item-2", "text": "왜 Redis가 아니라 Postgres인가요?", "rows": [...], "selectedText": "",
                 "answer": "...", "answer_source": "quick"}],
- "summary": {"comments": 0, "actions": 1, "questions": 1, "unanswered_questions": 0}}
+ "summary": {"comments": 0, "actions": 1, "questions": 1, "unanswered_questions": 0},
+ "file_path": "/abs/path/plan.md"}
 ```
+
+`file_path` is present when the review was opened from a file. Row `startLine` and `endLine` refer to that file, so read those lines before editing rather than searching for the text.
 
 `items` is what the user wants done:
 
