@@ -21,6 +21,7 @@ let view = 'table';
 let nextId = 1;
 let pollTimer = null;
 let done = false;
+let ended = false;            // read-only: submitted or server gone; keep the cards readable, stop talking to it
 
 // ---------- safe markdown ----------
 
@@ -58,7 +59,7 @@ const mdInline = (s) => marked.parseInline(String(s ?? ''));
 // ---------- markdown -> rows ----------
 
 function buildRows(content) {
-  const src = content.replace(/\r\n?/g, '\n');
+  const src = content.replace(/^\ufeff/, '').replace(/\r\n?/g, '\n');
   const out = [];
   let cursor = 0;
 
@@ -164,7 +165,7 @@ function renderStatus() {
 
 function renderSelection() {
   $('rows').querySelectorAll('tr').forEach((tr, i) => tr.setAttribute('aria-selected', selected.has(i)));
-  $('action-bar').hidden = !(view === 'table' && selected.size);
+  $('action-bar').hidden = !(view === 'table' && selected.size && !ended);
   $('sel-count').textContent = `${selected.size}개 선택`;
   positionBar();
 }
@@ -252,11 +253,12 @@ function updateEmpty() {
 const spinner = (label) => `<div class="pending"><span class="spinner" aria-hidden="true"></span>${label}</div>`;
 
 function questionParts(it) {
-  const q = it.quick || { text: '', done: false, failed: false };
+  const q = it.quick || { text: '', done: false, failed: false, held: false };
   const d = it.deep || { state: 'none', text: '' };
   let quick;
   if (it.failed) quick = '<div class="pending failed">전송 실패 — 제출 시 미답변 질문으로 전달됩니다</div>';
   else if (q.failed) quick = '<div class="pending failed">빠른 답변 실패, 깊이 조사로 전환합니다</div>';
+  else if (q.held) quick = spinner('배경 정리 중…');
   else if (!q.text) quick = spinner('답변 생성 중…');
   else {
     quick = `<div class="answer-label">답변${q.done ? '' : ' <span class="streaming">작성 중</span>'}</div>
@@ -348,7 +350,7 @@ $('preview-view').addEventListener('mouseup', () => {
   setTimeout(() => {
     const sel = window.getSelection();
     const text = sel.toString().trim();
-    if (!text || !sel.rangeCount || !$('preview-view').contains(sel.anchorNode)) {
+    if (ended || !text || !sel.rangeCount || !$('preview-view').contains(sel.anchorNode)) {
       previewSel = null;
       $('float-bar').hidden = true;
       return;
@@ -369,7 +371,7 @@ $('float-bar').addEventListener('mousedown', (e) => e.preventDefault());
 
 // target: {rows, selectedText, range}; defaults to the current selection.
 function startItem(type, target) {
-  if (!target && !hasSelection()) return;
+  if (ended || (!target && !hasSelection())) return;
   if (editing) {
     document.querySelector('.editor-slot textarea').focus();
     return;
@@ -451,7 +453,7 @@ const inFlight = (it) => isQ(it) && !it.failed
   && (!it.quick || (!it.quick.done && !it.quick.failed) || it.deep?.state === 'pending');
 
 function syncPolling() {
-  if (!pollTimer && !done && items.some(inFlight)) pollTimer = setTimeout(poll, 400);
+  if (!pollTimer && !done && !ended && items.some(inFlight)) pollTimer = setTimeout(poll, 400);
 }
 
 async function poll() {
@@ -476,6 +478,7 @@ $('sidebar').addEventListener('click', (e) => {
   const it = items.find((x) => x.id === card.dataset.id);
   if (!it) return;
   const follow = e.target.closest('[data-follow]');
+  if (ended && (follow || e.target.closest('[data-deepen], .del'))) return;
   if (follow) {
     startItem(follow.dataset.follow, { rows: it.rows, selectedText: it.selectedText, range: null });
     return;
@@ -524,21 +527,53 @@ $('sidebar').addEventListener('click', (e) => {
 // ---------- server ----------
 
 async function api(path, body) {
-  const res = await fetch(`/api/${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { 'X-Review-Token': token, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`/api/${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'X-Review-Token': token, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    // No connection at all: the review was closed or the session died.
+    sessionEnded();
+    throw err;
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 function showError(msg) {
+  if (ended) return;
   const el = $('error');
   el.textContent = `${msg} (클릭하여 닫기)`;
   el.hidden = false;
 }
-$('error').addEventListener('click', () => { $('error').hidden = true; });
+$('error').addEventListener('click', () => { if (!ended) $('error').hidden = true; });
+
+function sessionEnded() {
+  if (!done) readOnly('리뷰 세션이 종료되었습니다. 작성한 항목은 사이드바에 남아 있으니 필요하면 복사하세요.');
+}
+
+// Cards stay visible and copyable; nothing can be edited or sent any more.
+function readOnly(note) {
+  if (ended) return;
+  ended = true;
+  if (editing) discardEditing();
+  clearSelection();
+  document.body.classList.add('readonly');
+  $('error').textContent = note;
+  $('error').hidden = false;
+  $('submit').disabled = $('cancel').disabled = true;
+}
+
+let doneNote = '';
+function dismissDone() {
+  $('done').hidden = true;
+  document.body.classList.add('finished');  // neutral note: this is not an error
+  readOnly(doneNote);
+}
+$('done-view').addEventListener('click', dismissDone);
 
 // Items live only in memory: warn before a reload or tab close throws them away.
 window.addEventListener('beforeunload', (e) => {
@@ -547,7 +582,7 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 async function submit(status) {
-  if (done) return;
+  if (done || ended) return;
   if (status === 'cancelled' && !confirm('리뷰를 취소할까요? 작성한 항목은 전달되지 않습니다.')) return;
   const payload = {
     status,
@@ -565,8 +600,10 @@ async function submit(status) {
   syncPolling();
   $('done').querySelector('p').textContent = status === 'submitted'
     ? '제출 완료, 이 탭을 닫아도 됩니다' : '리뷰가 취소되었습니다. 이 탭을 닫아도 됩니다';
+  doneNote = status === 'submitted' ? '리뷰를 제출했습니다. 읽기 전용입니다.' : '리뷰를 취소했습니다. 읽기 전용입니다.';
   $('done').hidden = false;
-  window.close();
+  $('done-view').focus();
+  window.close();  // usually blocked for tabs the script did not open
 }
 
 // ---------- view, keyboard, splitter ----------
@@ -600,7 +637,11 @@ window.addEventListener('blur', () => setPassThrough(false));
 document.addEventListener('visibilitychange', () => setPassThrough(false));
 
 document.addEventListener('keydown', (e) => {
-  if (done || e.isComposing || e.keyCode === 229) return;
+  if (e.key === 'Escape' && !$('done').hidden) {
+    dismissDone();
+    return;
+  }
+  if (done || ended || e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Escape') {
     if (editing) discardEditing(); else clearSelection();
     return;
@@ -688,9 +729,10 @@ hsplitter.addEventListener('keydown', (e) => {
 
 (async () => {
   try {
-    const { title, content } = await api('review');
+    const { title, content, file } = await api('review');
     document.title = title;
     $('title').textContent = title;
+    $('file').textContent = file && file !== title ? file : '';
     rows = buildRows(content);
     renderRows();
     $('preview-view').innerHTML = md(content);

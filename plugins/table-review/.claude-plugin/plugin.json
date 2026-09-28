@@ -1,7 +1,7 @@
 {
   "name": "table-review",
   "description": "Table-first interactive markdown review in the browser: click rows to comment, ask questions answered within seconds, or request changes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "sigcrew"
   },

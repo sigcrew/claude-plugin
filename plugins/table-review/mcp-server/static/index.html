@@ -9,6 +9,7 @@
 <body>
   <header>
     <h1 id="title">Review</h1>
+    <span id="file"></span>
     <span id="counts"></span>
     <div class="toggle" role="group" aria-label="보기 전환">
       <button type="button" id="view-table" aria-pressed="true">테이블</button>
@@ -65,7 +66,8 @@
     <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
   </div>
 
-  <div id="done" hidden><p>제출 완료, 이 탭을 닫아도 됩니다</p></div>
+  <div id="done" hidden><p>제출 완료, 이 탭을 닫아도 됩니다</p>
+    <button type="button" id="done-view">작성한 내용 보기</button></div>
 
   <script src="marked.min.js"></script>
   <script src="app.js"></script>
