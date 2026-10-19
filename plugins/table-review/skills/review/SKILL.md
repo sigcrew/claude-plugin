@@ -1,7 +1,7 @@
 ---
 name: review
 description: |
-  Open a browser review UI for a plan or markdown document, where the user clicks table rows (or selects text) to leave comments, ask questions that get answered live, or request changes. Use whenever the user wants to review, check, or give feedback on something you wrote or on a file: "review this", "check this plan", "let me review", "/review", "리뷰", "검토해줘", "피드백 줄게", "이 파일 리뷰해줘: path/to/file.md". Prefer this over asking for feedback in the terminal when the content is longer than a few lines, because the user can point at the exact row they mean.
+  Open a browser review UI for a plan or markdown document, where the user clicks table rows (or selects text) to leave comments, ask questions that get answered live, or request changes. Use whenever the user wants to review, check, or give feedback on something you wrote or on a file: "review this", "check this plan", "let me review", "/review", "리뷰", "검토해줘", "피드백 줄게", "이 파일 리뷰해줘: path/to/file.md". Prefer this over asking for feedback in the terminal when the content is longer than a few lines, because the user can point at the exact row they mean. When you draft a plan or document the user is likely to review, save it to a file with Write instead of printing it in the conversation, show a short summary, and open the review from that file: the page opens in about a second from a file, while text passed inline has to be written out again as tool arguments, which took 42 seconds for a 6,500 character plan.
 allowed-tools:
   - mcp__plugin_table-review_table_review__start_review
   - mcp__plugin_table-review_table_review__wait_review
@@ -27,6 +27,8 @@ The page answers questions by itself within a few seconds, using a separate quic
 ## 1. Open the page first
 
 The user is waiting for a browser tab, so get it open before doing anything slow. Everything you write into a tool call is generated token by token: passing an 11,000 character document as `content` together with a long background summary once took two minutes before the page appeared.
+
+If you are about to present a draft for review, write it to a file first and show the user only a short summary. Printing the whole draft and then passing it again as `content` emits it twice.
 
 Pick the source in this order:
 
@@ -56,7 +58,7 @@ Write what a reviewer is likely to ask about and the document does not say:
 - relevant facts about the codebase or environment that you found (file names, existing patterns, versions)
 - known risks, open questions, and assumptions
 
-Aim for the facts a reviewer would ask about, in compact bullets. The page is already open while you write this, and a question asked before the context arrives is held for it, so length here costs the user waiting time on their first question. If you have no background (for example, the user asked you to open a file you know nothing about), say exactly that so the answerer does not invent reasons.
+Aim for the facts a reviewer would ask about, in compact bullets, and stop at roughly 1,500 characters. The page is already open while you write this, and a question asked before the context arrives is held for it, so every line here delays the user's first answer: a 2,700 character context took 26 seconds to write. If you have no background (for example, the user asked you to open a file you know nothing about), say exactly that so the answerer does not invent reasons.
 
 ## 3. Run the review loop
 
