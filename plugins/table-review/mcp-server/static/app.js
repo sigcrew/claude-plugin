@@ -73,9 +73,14 @@ function buildRows(content) {
     const start = src.slice(0, pos).split('\n').length;
     return [start, start + body.split('\n').length - 1];
   };
+  // Rows are indented by the heading they fall under (relative to the shallowest heading in
+  // the document, so a file that starts at H2 is not indented from the start), plus list nesting.
+  const tokens = marked.lexer(src);
+  const base = Math.min(...tokens.filter((t) => t.type === 'heading').map((t) => t.depth), Infinity);
+  let section = 0;  // indent for content rows under the current heading
   const add = (blockType, text, html, raw, depth = 0) => {
     const [startLine, endLine] = lines(raw);
-    out.push({ index: out.length + 1, blockType, text, html, depth, startLine, endLine });
+    out.push({ index: out.length + 1, blockType, text, html, depth: section + depth, startLine, endLine });
   };
 
   const addList = (list, depth) => {
@@ -93,14 +98,16 @@ function buildRows(content) {
     }
   };
 
-  for (const tok of marked.lexer(src)) {
+  for (const tok of tokens) {
     switch (tok.type) {
       case 'space':
       case 'hr':
         lines(tok.raw);
         break;
       case 'heading':
+        section = tok.depth - base;
         add('H' + tok.depth, tok.text, `<span class="h h${tok.depth}">${mdInline(tok.text)}</span>`, tok.raw);
+        section += 1;
         break;
       case 'paragraph':
         add('P', tok.text, mdInline(tok.text), tok.raw);
@@ -124,7 +131,7 @@ function buildRows(content) {
             blockType: 'TR',
             text: pairs.map(([h, v]) => `${h}: ${v}`).join(' | '),
             html: pairs.map(([h, v]) => `<div><span class="k">${mdInline(h)}</span>: ${mdInline(v)}</div>`).join(''),
-            depth: 0,
+            depth: section,
             startLine: line,
             endLine: line,
           });
@@ -146,8 +153,7 @@ function renderRows() {
   $('rows').innerHTML = rows.map((r, i) => `
     <tr data-i="${i}" aria-selected="false">
       <td class="num">${r.index}</td>
-      <td class="type"><span class="bt">${r.blockType}</span></td>
-      <td class="content" style="padding-left:${0.75 + r.depth * 1.5}rem">${r.html}</td>
+      <td class="content" style="padding-left:${0.75 + r.depth * 1.25}rem">${r.html}</td>
       <td class="status"></td>
     </tr>`).join('');
 }
