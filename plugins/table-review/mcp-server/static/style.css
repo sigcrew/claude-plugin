@@ -158,7 +158,6 @@ header h1 { margin: 0; font-size: 17px; }
 /* ---------- table ---------- */
 table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 col.c-num { width: 3.5em; }
-col.c-type { width: 5.5em; }
 col.c-status { width: 8em; }
 th {
   position: sticky;
@@ -179,7 +178,6 @@ tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 4px 0 var(--ac
 tbody tr.flash td { animation: flash 1.2s ease-out; }
 td.num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 td.status { font-size: 13px; white-space: pre; }
-.bt { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
 td.content { overflow-wrap: anywhere; }
 td.content p { margin: 0; }
 td.content p + p { margin-top: 0.5em; }
