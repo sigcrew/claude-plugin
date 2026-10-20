@@ -15,6 +15,12 @@
       <button type="button" id="view-table" aria-pressed="true">테이블</button>
       <button type="button" id="view-preview" aria-pressed="false">미리보기</button>
     </div>
+    <div class="toggle" id="ratio" role="group" aria-label="본문 : 카드 비율">
+      <button type="button" data-ratio="0.6">4:6</button>
+      <button type="button" data-ratio="0.5">5:5</button>
+      <button type="button" data-ratio="0.3333">2:1</button>
+      <button type="button" data-ratio="0.25">3:1</button>
+    </div>
     <span class="spacer"></span>
     <button type="button" id="cancel">취소</button>
     <button type="button" id="submit" class="primary" title="Cmd/Ctrl+Enter">리뷰 제출</button>
@@ -36,6 +42,7 @@
         <button type="button" data-type="comment"><kbd>1</kbd> 코멘트</button>
         <button type="button" data-type="question"><kbd>2</kbd> 질문</button>
         <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
+        <button type="button" data-type="approve"><kbd>4</kbd> 승인</button>
       </div>
     </main>
     <div id="splitter" role="separator" aria-orientation="vertical" aria-label="사이드바 너비 조절" tabindex="0"></div>
@@ -64,6 +71,7 @@
     <button type="button" data-type="comment"><kbd>1</kbd> 코멘트</button>
     <button type="button" data-type="question"><kbd>2</kbd> 질문</button>
     <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
+    <button type="button" data-type="approve"><kbd>4</kbd> 승인</button>
   </div>
 
   <div id="done" hidden><p>제출 완료, 이 탭을 닫아도 됩니다</p>

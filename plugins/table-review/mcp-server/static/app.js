@@ -7,7 +7,8 @@ const TYPES = {
   question: { label: '질문', icon: '❓' },
   action: { label: '수정 요청', icon: '✏️' },
 };
-const TYPE_BY_KEY = { 1: 'comment', 2: 'question', 3: 'action' };
+const TYPE_BY_KEY = { 1: 'comment', 2: 'question', 3: 'action', 4: 'approve' };
+const APPROVE_TEXT = '제안 승인';  // key 4: saved as a comment without opening the editor
 
 let rows = [];               // {index, blockType, text, startLine, endLine, html, depth}
 let items = [];              // saved items, newest first
@@ -162,8 +163,8 @@ function renderStatus() {
   const counts = rows.map(() => ({ comment: 0, question: 0, action: 0 }));
   for (const it of items) for (const r of it.rows) counts[r.index - 1][it.type]++;
   $('rows').querySelectorAll('tr').forEach((tr, i) => {
-    tr.querySelector('.status').textContent = Object.entries(counts[i])
-      .filter(([, n]) => n).map(([t, n]) => `${TYPES[t].icon} ${n}`).join('  ');
+    tr.querySelector('.status').innerHTML = Object.entries(counts[i])
+      .filter(([, n]) => n).map(([t, n]) => `<span class="st" data-type="${t}">${TYPES[t].icon} ${n}</span>`).join(' ');
   });
   const total = (t) => items.filter((it) => it.type === t).length;
   $('counts').textContent = `코멘트 ${total('comment')} · 질문 ${total('question')} · 수정 요청 ${total('action')}`;
@@ -238,10 +239,12 @@ function cardHtml(it) {
     <div class="text">${esc(it.text)}</div>${foot}</article>`;
 }
 
-// Questions live in the top section, comments and actions in the bottom one.
+// Questions live in the top section, newest first. Comments and actions in the bottom one follow
+// document order (first row of each card; text selections from the preview last), newest first on ties.
+const firstRow = (it) => (it.rows.length ? it.rows[0].index : Number.MAX_SAFE_INTEGER);
 function renderCards() {
   const qs = items.filter(isQ);
-  const cs = items.filter((it) => !isQ(it));
+  const cs = items.filter((it) => !isQ(it)).sort((a, b) => firstRow(a) - firstRow(b));
   $('q-cards').innerHTML = qs.map(cardHtml).join('');
   $('c-cards').innerHTML = cs.map(cardHtml).join('');
   qs.forEach(updateQuestion);
@@ -327,6 +330,9 @@ function onRowClick(e) {
   const tr = e.target.closest('tr');
   if (!tr || e.target.closest('a')) return;
   const i = Number(tr.dataset.i);
+  const st = e.target.closest('.st');
+  if (st) { focusCards(i, st.dataset.type); return; }
+  if (e.target.closest('.status')) return;  // empty part of the status cell: not a row toggle
   barRow = i;
   barX = e.clientX;
   if (e.shiftKey && anchor !== null) {
@@ -345,6 +351,21 @@ function onRowClick(e) {
   renderSelection();
 }
 $('rows').addEventListener('click', onRowClick);
+
+// Status icon: scroll to the first card of that type on the row and flash every such card.
+function focusCards(i, type) {
+  const ids = new Set(items.filter((it) => it.type === type && it.rows.some((r) => r.index === i + 1)).map((it) => it.id));
+  const cards = [...$('sidebar').querySelectorAll('.card[data-id]')].filter((c) => ids.has(c.dataset.id));
+  const seen = new Set();  // questions and comments scroll separately: bring the first card of each into view
+  for (const c of cards) {
+    const section = c.closest('.side-section');
+    if (!seen.has(section)) { seen.add(section); c.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    c.classList.remove('flash');
+    void c.offsetWidth;  // restart the animation on a repeated click
+    c.classList.add('flash');
+    c.addEventListener('animationend', () => c.classList.remove('flash'), { once: true });
+  }
+}
 // macOS turns Ctrl+click into a context menu instead of a click; treat it as Ctrl+click.
 $('rows').addEventListener('contextmenu', (e) => {
   if (!e.ctrlKey || e.button !== 0) return;
@@ -389,7 +410,8 @@ function startItem(type, target) {
       }), selectedText: '', range: null }
     : { rows: [], selectedText: previewSel.text, range: previewSel.range };
   editing.id = `item-${nextId++}`;
-  editing.type = type;
+  editing.type = type === 'approve' ? 'comment' : type;
+  if (type === 'approve') { saveItem(APPROVE_TEXT); return; }
 
   const box = document.createElement('article');
   box.className = `card ${type} editing`;
@@ -428,6 +450,10 @@ function saveEditing(ta) {
     else ta.classList.add('invalid');
     return;
   }
+  saveItem(text);
+}
+
+function saveItem(text) {
   const { range, ...item } = editing;
   item.text = text;
   if (range) {
@@ -665,16 +691,25 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-const SIDEBAR_KEY = 'table-review.sidebar-width';
-function setSidebarWidth(px, save) {
-  const w = Math.round(Math.min(Math.max(px, 260), Math.max(260, window.innerWidth * 0.7)));
-  $('layout').style.setProperty('--sidebar-w', `${w}px`);
+// Sidebar width is a share of the layout (default 5:5); CSS keeps it at least 260px.
+const SIDEBAR_KEY = 'table-review.sidebar-ratio';
+function setSidebarRatio(r, save) {
+  const ratio = Math.min(Math.max(r, 0.15), 0.7);
+  $('layout').style.setProperty('--sidebar-w', `${(ratio * 100).toFixed(2)}%`);
+  $('ratio').querySelectorAll('button').forEach((b) =>
+    b.setAttribute('aria-pressed', Math.abs(Number(b.dataset.ratio) - ratio) < 0.005));
   schedulePositionBar();
-  if (save) try { localStorage.setItem(SIDEBAR_KEY, String(w)); } catch { /* storage unavailable */ }
+  if (save) try { localStorage.setItem(SIDEBAR_KEY, String(ratio)); } catch { /* storage unavailable */ }
 }
+const sidebarRatio = () => $('sidebar').offsetWidth / $('layout').clientWidth;
+$('ratio').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-ratio]');
+  if (b) setSidebarRatio(Number(b.dataset.ratio), true);
+});
+setSidebarRatio(0.5, false);
 try {
   const saved = Number(localStorage.getItem(SIDEBAR_KEY));
-  if (saved) setSidebarWidth(saved, false);
+  if (saved) setSidebarRatio(saved, false);
 } catch { /* storage unavailable */ }
 
 const splitter = $('splitter');
@@ -683,16 +718,18 @@ splitter.addEventListener('pointerdown', (e) => {
   document.body.classList.add('resizing');
 });
 splitter.addEventListener('pointermove', (e) => {
-  if (splitter.hasPointerCapture(e.pointerId)) setSidebarWidth(window.innerWidth - e.clientX, false);
+  if (!splitter.hasPointerCapture(e.pointerId)) return;
+  const box = $('layout').getBoundingClientRect();
+  setSidebarRatio((box.right - e.clientX) / box.width, false);
 });
 splitter.addEventListener('pointerup', (e) => {
   splitter.releasePointerCapture(e.pointerId);
   document.body.classList.remove('resizing');
-  setSidebarWidth($('sidebar').offsetWidth, true);
+  setSidebarRatio(sidebarRatio(), true);
 });
 splitter.addEventListener('keydown', (e) => {
-  const step = { ArrowLeft: 24, ArrowRight: -24 }[e.key];
-  if (step) setSidebarWidth($('sidebar').offsetWidth + step, true);
+  const step = { ArrowLeft: 0.02, ArrowRight: -0.02 }[e.key];
+  if (step) setSidebarRatio(sidebarRatio() + step, true);
 });
 
 // Question / comment split: CSS min-heights keep both sections usable.

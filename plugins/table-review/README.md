@@ -23,14 +23,16 @@ A file on disk opens in seconds, because the server reads it directly. Text that
 | Click a row | Select it |
 | Cmd/Ctrl+click | Add or remove a row from the selection |
 | Shift+click | Select a range |
+| Click a status icon of a row | Scroll to and highlight the cards of that type on the row |
 | `1` | Comment on the selection |
 | `2` | Ask a question, answered in the card within seconds |
 | `3` | Request a change |
+| `4` | Approve: saves the comment `제안 승인` on the selection without opening a card |
 | Enter / Shift+Enter | Save the card / new line |
 | Esc | Clear the selection or discard the card being edited |
 | Cmd/Ctrl+Enter | Submit the review |
 
-The three actions appear as an overlay above the last row you selected.
+The four actions appear as an overlay above the last row you selected. The document and the cards split the width 5:5 by default; the header buttons switch to 4:6, 2:1 or 3:1, and the divider between them can still be dragged.
 
 The sidebar has two areas. Questions and their answers sit on top, comments and change requests below. An answered question has `코멘트` and `수정 요청` buttons that start a card on the same rows. On submit, Claude acts on comments and change requests, and gets the questions as background only.
 
