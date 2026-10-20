@@ -130,7 +130,7 @@ A submitted result has two lists:
 `items` is what the user wants done:
 
 - **`action`**: the user asked for this change. Apply it to the document or plan (edit the file if the content came from one), using `rows` to locate the spot.
-- **`comment`**: feedback to take into account. Revise when the comment implies a change. A comment that only acknowledges or approves needs no change.
+- **`comment`**: feedback to take into account. Revise when the comment implies a change. A comment that only acknowledges or approves needs no change. The text `제안 승인` is the page's one-key approval of those rows: keep them as they are.
 
 `questions` is background, not a to-do list:
 
