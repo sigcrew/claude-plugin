@@ -18,6 +18,7 @@ Opens a local web page showing the content as a table, one block (heading, parag
 |------|---------|-----------------|
 | `comment` | Feedback or a note | On submit, in `items` |
 | `action` | A change the user wants made | On submit, in `items` |
+| `suggestion` | The user rewrote the row text themselves | On submit, in `items`, with `original` |
 | question | Something the user wants to understand before commenting | Usually never, see below |
 
 Questions are a reading aid, not review output. The user asks, reads the answer in the page, and then writes a comment or change request based on it.
@@ -85,12 +86,12 @@ A `question` result means the user wants more than the quick answer gave. Each q
 ```json
 {"id": "item-2", "text": "왜 Redis가 아니라 Postgres인가요?",
  "rows": [{"index": 4, "blockType": "LI", "text": "세션 저장소를 Postgres로 교체", "startLine": 12, "endLine": 12}],
- "selectedText": "",
+ "selectedText": "", "thread": [],
  "quick_answer": "문서에 따르면 운영 중인 Redis 클러스터가 없기 때문입니다...",
  "reason": "requested"}
 ```
 
-`reason` is `requested` when the user pressed the button, and `quick_failed` when the quick call could not run and the question came to you instead. In that case `quick_answer` is empty.
+`reason` is `requested` when the user pressed the button, and `quick_failed` when the quick call could not run and the question came to you instead. In that case `quick_answer` is empty. `thread` holds the earlier questions and answers when this is a follow-up asked under another question, as `[{"question", "answer"}, ...]` in order; give it to the subagent too, since the question only makes sense after them.
 
 Investigate with a subagent (`Agent` tool) rather than inline. The user is waiting in the browser, and a subagent keeps file reads and searches out of this conversation's context. When several questions arrive together, spawn their subagents in one message so they run in parallel.
 
@@ -121,7 +122,8 @@ A submitted result has two lists:
  "items": [{"id": "item-5", "type": "action", "rows": [...], "selectedText": "", "text": "Postgres 대신 Redis로 바꿔주세요"}],
  "questions": [{"id": "item-2", "text": "왜 Redis가 아니라 Postgres인가요?", "rows": [...], "selectedText": "",
                 "answer": "...", "answer_source": "quick"}],
- "summary": {"comments": 0, "actions": 1, "questions": 1, "unanswered_questions": 0},
+ "seen": [1, 2, 3],
+ "summary": {"comments": 0, "actions": 1, "suggestions": 0, "questions": 1, "unanswered_questions": 0},
  "file_path": "/abs/path/plan.md"}
 ```
 
@@ -130,21 +132,25 @@ A submitted result has two lists:
 `items` is what the user wants done:
 
 - **`action`**: the user asked for this change. Apply it to the document or plan (edit the file if the content came from one), using `rows` to locate the spot.
-- **`comment`**: feedback to take into account. Revise when the comment implies a change. A comment that only acknowledges or approves needs no change. The text `제안 승인` is the page's one-key approval of those rows: keep them as they are.
+- **`suggestion`**: the user edited the text of `rows` in the page. `original` is what they started from and `text` is their version. Apply `text` in place of the original, keeping the markdown around it (list markers, heading level, table cells) intact.
+- **`comment`**: feedback to take into account. Revise when the comment implies a change. A comment that only acknowledges or approves needs no change. The text `제안 승인` is the page's one-key approval of those rows: keep them as they are. A comment may begin with a `>` quote: that is the exact text the user dragged inside the row, so the comment is about that phrase.
 
 `questions` is background, not a to-do list:
 
 - Use it to understand the items. A comment on the same rows as a question was most likely written after reading that answer, so read them together: "그럼 Redis로" only makes sense next to the question about Redis.
 - Do not repeat answers the user already read, and do not change the document because of a question alone.
 - Read the answers with `answer_source: "quick"` critically. They were written without this conversation or the codebase. If one told the user something wrong and an item depends on it, say so before acting on that item, since the user decided on bad information.
+- A question with `parent` is a follow-up asked under that earlier question; read the thread in order.
 - A question **without** `answer` means the user submitted before any answer arrived. Answer it in your reply.
+
+`seen` lists the row numbers the user marked ✓ while reading. It is an acknowledgement, not approval or a to-do: use it only to tell which parts the user looked at.
 
 Then report briefly:
 
 ```
 ## 리뷰 결과
 
-**수정 요청** N건 · **코멘트** N건
+**수정 요청** N건 · **제안** N건 · **코멘트** N건
 
 ### 반영한 내용
 - Row 4: <what changed>

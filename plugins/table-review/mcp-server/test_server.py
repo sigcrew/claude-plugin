@@ -154,7 +154,7 @@ async def main():
     assert await call("/api/deepen", {"id": "q1"}, token) == (200, {"status": "ok"})
     res = await asyncio.wait_for(wait, 5)
     assert res["status"] == "question", res
-    assert res["questions"] == [{**question("q1", "왜 1단계가 먼저인가요?"), "reason": "requested",
+    assert res["questions"] == [{**question("q1", "왜 1단계가 먼저인가요?"), "thread": [], "reason": "requested",
                                  "quick_answer": "빠른 답변 입니다."}], res
     assert (await answers(token))["q1"]["deep"]["state"] == "pending"
 
@@ -227,7 +227,7 @@ async def main():
     assert res["status"] == "submitted" and res["items"] == items and "file_path" not in res, res
     got = {q["id"]: (q.get("answer"), q.get("answer_source")) for q in res["questions"]}
     assert got == {"q1": ("**깊은** 답", "deep"), "q2": (None, None), "q5": ("빠른 답변 입니다.", "quick")}, got
-    assert res["summary"] == {"comments": 1, "actions": 0, "questions": 3, "unanswered_questions": 1}, res
+    assert res["summary"] == {"comments": 1, "actions": 0, "suggestions": 0, "questions": 3, "unanswered_questions": 1}, res
     assert (await server.answer_question_impl([]))["status"] == "error"
     assert (await server.wait_review_impl())["status"] == "error"
 
@@ -243,7 +243,7 @@ async def main():
     await asyncio.sleep(0.3)
     assert proc.poll() is not None, "child still running after shutdown"
     res = await asyncio.wait_for(server.wait_review_impl(), 1)
-    assert res["summary"] == {"comments": 0, "actions": 0, "questions": 0, "unanswered_questions": 0}, res
+    assert res["summary"] == {"comments": 0, "actions": 0, "suggestions": 0, "questions": 0, "unanswered_questions": 0}, res
 
     # cancel: same
     _, token = await start(content="x")
@@ -282,8 +282,8 @@ async def undelivered():
         res = await server.start_review_impl(content="다음 문서", replace=True)
         assert res["status"] == "undelivered_result" and res["next"] == server.UNDELIVERED_NEXT, res
         expected = ({"status": "cancelled"} if status == "cancelled" else
-                    {"status": "submitted", "items": items, "questions": [], "file_path": str(f),
-                     "summary": {"comments": 1, "actions": 0, "questions": 0, "unanswered_questions": 0}})
+                    {"status": "submitted", "items": items, "questions": [], "seen": [], "file_path": str(f),
+                     "summary": {"comments": 1, "actions": 0, "suggestions": 0, "questions": 0, "unanswered_questions": 0}})
         assert res["result"] == expected, res
         assert (await server.wait_review_impl())["status"] == "error", "delivered once only"
         res, _ = await start(content="다음 문서")

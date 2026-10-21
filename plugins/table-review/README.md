@@ -24,17 +24,26 @@ A file on disk opens in seconds, because the server reads it directly. Text that
 | Cmd/Ctrl+click | Add or remove a row from the selection |
 | Shift+click | Select a range |
 | Click a status icon of a row | Scroll to and highlight the cards of that type on the row |
+| Click a card | Scroll to and highlight its rows |
 | `1` | Comment on the selection |
 | `2` | Ask a question, answered in the card within seconds |
 | `3` | Request a change |
 | `4` | Approve: saves the comment `제안 승인` on the selection without opening a card |
+| `5` | Suggest: edit the row text in place; the card shows a word diff and Claude gets both versions |
+| `↑` `↓` (or `k` `j`) | Move the selection one row; with Shift, extend it |
+| Space | Mark the selected rows as read (✓); the header counts them |
+| Drag text inside a row, then `1`/`2`/`3` | The dragged text is quoted at the top of the card |
+| `▾` on a heading | Fold its section; a folded heading shows the hidden rows' card counts |
 | Enter / Shift+Enter | Save the card / new line |
 | Esc | Clear the selection or discard the card being edited |
 | Cmd/Ctrl+Enter | Submit the review |
+| `t` / `p` | Switch to the table / preview view |
 
 The four actions appear as an overlay above the last row you selected. The document and the cards split the width 5:5 by default; the header buttons switch to 4:6, 2:1 or 3:1, and the divider between them can still be dragged.
 
-The sidebar has two areas. Questions and their answers sit on top, comments and change requests below. An answered question has `코멘트` and `수정 요청` buttons that start a card on the same rows. On submit, Claude acts on comments and change requests, and gets the questions as background only.
+The sidebar has two areas. Questions and their answers sit on top, comments, change requests and suggestions below, in row order, with a filter in the section title. An answered question has `코멘트` and `수정 요청` buttons that start a card on the same rows, and a box to ask a follow-up in the same card: the follow-up is answered with the earlier questions and answers as context. On submit, Claude acts on comments, change requests and suggestions, and gets the questions and the ✓ marks as background only.
+
+The header has `A−`/`A+` for the document text size; long lines wrap at about 80 characters whatever the width. The theme follows the system setting; `시스템 | 라이트 | 다크` in the header pins one, and the choice is remembered in the browser.
 
 ### How questions are answered
 

@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Review</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Apply a saved theme choice before the first paint so the page does not flash the system theme.
+    try { var t = localStorage.getItem('table-review.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
 </head>
 <body>
   <header>
@@ -12,14 +16,23 @@
     <span id="file"></span>
     <span id="counts"></span>
     <div class="toggle" role="group" aria-label="보기 전환">
-      <button type="button" id="view-table" aria-pressed="true">테이블</button>
-      <button type="button" id="view-preview" aria-pressed="false">미리보기</button>
+      <button type="button" id="view-table" aria-pressed="true" title="테이블 (T)">테이블</button>
+      <button type="button" id="view-preview" aria-pressed="false" title="미리보기 (P)">미리보기</button>
     </div>
     <div class="toggle" id="ratio" role="group" aria-label="본문 : 카드 비율">
       <button type="button" data-ratio="0.6">4:6</button>
       <button type="button" data-ratio="0.5">5:5</button>
       <button type="button" data-ratio="0.3333">2:1</button>
       <button type="button" data-ratio="0.25">3:1</button>
+    </div>
+    <div class="toggle" role="group" aria-label="글자 크기">
+      <button type="button" id="font-dec" aria-label="글자 작게">A−</button>
+      <button type="button" id="font-inc" aria-label="글자 크게">A+</button>
+    </div>
+    <div class="toggle" id="theme" role="group" aria-label="테마">
+      <button type="button" data-theme="" aria-pressed="true">시스템</button>
+      <button type="button" data-theme="light" aria-pressed="false">라이트</button>
+      <button type="button" data-theme="dark" aria-pressed="false">다크</button>
     </div>
     <span class="spacer"></span>
     <button type="button" id="cancel">취소</button>
@@ -43,6 +56,7 @@
         <button type="button" data-type="question"><kbd>2</kbd> 질문</button>
         <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
         <button type="button" data-type="approve"><kbd>4</kbd> 승인</button>
+        <button type="button" data-type="suggestion"><kbd>5</kbd> 제안</button>
       </div>
     </main>
     <div id="splitter" role="separator" aria-orientation="vertical" aria-label="사이드바 너비 조절" tabindex="0"></div>
@@ -57,11 +71,17 @@
       </section>
       <div id="hsplitter" role="separator" aria-orientation="horizontal" aria-label="질문 영역 높이 조절" tabindex="0"></div>
       <section id="c-section" class="side-section" aria-labelledby="c-title">
-        <h2 id="c-title">코멘트 · 수정 요청 <span id="c-count" class="count">0</span></h2>
+        <h2 id="c-title">코멘트 · 수정 요청 <span id="c-count" class="count">0</span>
+          <span class="toggle filter" id="c-filter" role="group" aria-label="카드 필터">
+            <button type="button" data-filter="" aria-pressed="true">전체</button>
+            <button type="button" data-filter="comment" aria-pressed="false">코멘트</button>
+            <button type="button" data-filter="action" aria-pressed="false">수정</button>
+            <button type="button" data-filter="suggestion" aria-pressed="false">제안</button>
+          </span></h2>
         <div class="side-scroll">
           <div id="c-editor" class="editor-slot"></div>
           <div id="c-cards"></div>
-          <p id="c-empty" class="empty">행이나 텍스트를 선택하고 <kbd>1</kbd> 코멘트, <kbd>3</kbd> 수정 요청을 추가하세요.</p>
+          <p id="c-empty" class="empty">행이나 텍스트를 선택하고 <kbd>1</kbd> 코멘트, <kbd>3</kbd> 수정 요청, <kbd>5</kbd> 제안을 추가하세요. <kbd>↑</kbd><kbd>↓</kbd> 로 이동, <kbd>Space</kbd> 로 확인 표시.</p>
         </div>
       </section>
     </aside>
@@ -72,6 +92,7 @@
     <button type="button" data-type="question"><kbd>2</kbd> 질문</button>
     <button type="button" data-type="action"><kbd>3</kbd> 수정 요청</button>
     <button type="button" data-type="approve"><kbd>4</kbd> 승인</button>
+    <button type="button" data-type="suggestion"><kbd>5</kbd> 제안</button>
   </div>
 
   <div id="done" hidden><p>제출 완료, 이 탭을 닫아도 됩니다</p>

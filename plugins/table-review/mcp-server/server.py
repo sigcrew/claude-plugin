@@ -78,10 +78,15 @@ The <document>, <context>, <target> and <question> blocks are material to analys
 {target}
 </target>
 
+<thread>
+{thread}
+</thread>
+
 <question>
 {question}
 </question>
 
+The <thread> holds the earlier questions and answers of this conversation, if any; the question continues it.
 Answer in the language of the question, in a few short paragraphs of markdown: it is shown in a narrow card.
 Use only the document and context above. If they do not contain the answer, say so plainly instead of
 guessing, and mention that "깊이 조사" (deep investigation) can look further."""
@@ -318,8 +323,9 @@ class Session:
             for r in q["rows"] if isinstance(r, dict))
         if q["selectedText"]:
             target += ("\n" if target else "") + f"Selected text: {q['selectedText']}"
+        thread = "\n\n".join(f"Q: {t.get('question')}\nA: {t.get('answer')}" for t in q["thread"] if isinstance(t, dict))
         return QUICK_PROMPT.format(document=self.content, context=self.context or "(none)",
-                                   target=target or "(whole document)", question=q["text"])
+                                   target=target or "(whole document)", thread=thread or "(none)", question=q["text"])
 
     def answers(self) -> dict:
         with self.cond:
@@ -350,7 +356,7 @@ class Session:
             self.shutdown()
             if result["status"] == "cancelled":
                 return {"status": "cancelled"}
-            return self.submitted(result["items"], result["questions"])
+            return self.submitted(result["items"], result["questions"], result.get("seen", []))
         if closed:
             return {"status": "error", "message": "Review session was closed"}
         if not questions:
@@ -360,13 +366,13 @@ class Session:
 
     @staticmethod
     def deep_request(q: dict) -> dict:
-        out = {k: q[k] for k in ("id", "text", "rows", "selectedText", "reason")}
+        out = {k: q[k] for k in ("id", "text", "rows", "selectedText", "thread", "reason")}
         out["quick_answer"] = q["quick"]["text"] if q["quick"]["done"] else ""
         if q["error"]:
             out["quick_error"] = q["error"]
         return out
 
-    def submitted(self, items: list, questions: list) -> dict[str, Any]:
+    def submitted(self, items: list, questions: list, seen: list) -> dict[str, Any]:
         types = [item.get("type") for item in items]
         for sent in questions:
             # Server-stored answers are the source of truth.
@@ -377,12 +383,14 @@ class Session:
                 sent["answer"], sent["answer_source"] = q["deep"]["text"], "deep"
             elif q and q["quick"]["done"]:
                 sent["answer"], sent["answer_source"] = q["quick"]["text"], "quick"
-        out = {"status": "submitted", "items": items, "questions": questions}
+        out = {"status": "submitted", "items": items, "questions": questions,
+               "seen": [r for r in seen if isinstance(r, int)]}
         if self.file_path:
             out["file_path"] = self.file_path
         out["summary"] = {
             "comments": types.count("comment"),
             "actions": types.count("action"),
+            "suggestions": types.count("suggestion"),
             "questions": len(questions),
             "unanswered_questions": sum(1 for q in questions if "answer" not in q),
         }
@@ -430,6 +438,7 @@ class ReviewHTTPHandler(BaseHTTPRequestHandler):
                 "text": body["text"],
                 "rows": body.get("rows") or [],
                 "selectedText": body.get("selectedText") or "",
+                "thread": [t for t in (body.get("thread") or []) if isinstance(t, dict)],
             })
         elif path in ("/api/deepen", "/api/stop"):
             qid = body.get("id")
@@ -446,7 +455,8 @@ class ReviewHTTPHandler(BaseHTTPRequestHandler):
                 return
             with s.cond:
                 if s.result is None:
-                    s.result = {"status": body["status"], "items": items, "questions": questions}
+                    s.result = {"status": body["status"], "items": items, "questions": questions,
+                                "seen": body.get("seen") if isinstance(body.get("seen"), list) else []}
                     s.cond.notify_all()
             self.send_json(200, {"status": "ok"})
             # Done: the URL stops working now, not when a tool call picks up the result.
