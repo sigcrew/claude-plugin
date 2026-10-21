@@ -539,30 +539,31 @@ $('float-bar').addEventListener('mousedown', (e) => e.preventDefault());
 // target: {rows, selectedText, range}; defaults to the current selection.
 function startItem(type, target) {
   if (ended || (!target && !hasSelection())) return;
-  if (editing) {
-    document.querySelector('.editor-slot textarea').focus();
-    return;
-  }
-  editing = target ? { ...target } : view === 'table'
+  const next = target ? { ...target } : view === 'table'
     ? { rows: [...selected].sort((a, b) => a - b).map((i) => {
         const { index, blockType, text, startLine, endLine } = rows[i];
         return { index, blockType, text, startLine, endLine };
       }), selectedText: '', range: null }
     : { rows: [], selectedText: previewSel.text, range: previewSel.range };
+  // Quote text dragged inside the rows (read before flushing: saving clears the selection).
+  let quote = '';
+  if (view === 'table' && !target) {
+    const sel = window.getSelection();
+    const t = sel.toString().trim();
+    if (t && $('rows').contains(sel.anchorNode)) quote = '> ' + t.replace(/\n/g, '\n> ') + '\n\n';
+  }
+  flushEditing();  // a card still being written is kept, not abandoned
+  editing = next;
   editing.id = `item-${nextId++}`;
   editing.type = type === 'approve' ? 'comment' : type;
   if (type === 'approve') { saveItem(APPROVE_TEXT); return; }
 
-  // Prefill: a suggestion starts from the current text; other cards quote text dragged inside the rows.
-  let prefill = '', hint = 'Enter 저장 · Shift+Enter 줄바꿈 · Esc 취소';
+  // Prefill: a suggestion starts from the current text; other cards quote the dragged text.
+  let prefill = quote, hint = 'Enter 저장 · Shift+Enter 줄바꿈 · Esc 취소';
   if (type === 'suggestion') {
     editing.original = editing.rows.length ? editing.rows.map((r) => r.text).join('\n\n') : editing.selectedText;
     prefill = editing.original;
     hint = '원문을 고쳐 쓰세요 · ' + hint;
-  } else if (view === 'table' && !target) {
-    const sel = window.getSelection();
-    const t = sel.toString().trim();
-    if (t && $('rows').contains(sel.anchorNode)) prefill = '> ' + t.replace(/\n/g, '\n> ') + '\n\n';
   }
   const box = document.createElement('article');
   box.className = `card ${type} editing`;
@@ -589,6 +590,15 @@ function startItem(type, target) {
   ta.focus();
 }
 
+// Save the open editor if it holds a valid text, otherwise drop it.
+function flushEditing() {
+  if (!editing) return;
+  const ta = document.querySelector('.editor-slot textarea');
+  const text = ta ? ta.value.trim() : '';
+  if (text && !(editing.type === 'suggestion' && text === editing.original.trim())) saveItem(text, true);
+  else discardEditing();
+}
+
 function discardEditing() {
   editing = null;
   $('q-editor').replaceChildren();
@@ -606,7 +616,7 @@ function saveEditing(ta) {
   saveItem(text);
 }
 
-function saveItem(text) {
+function saveItem(text, keepSelection = false) {
   const { range, ...item } = editing;
   item.text = text;
   if (range) {
@@ -619,7 +629,7 @@ function saveItem(text) {
   }
   items.unshift(item);
   discardEditing();
-  clearSelection();
+  if (!keepSelection) clearSelection();
   renderCards();
   if (item.type === 'question') sendQuestion(item);
 }
