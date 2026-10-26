@@ -12,9 +12,28 @@ Table-first interactive markdown review for Claude Code. Based on
 
 Requires [uv](https://docs.astral.sh/uv/). Quick answers also need the `claude` CLI on `PATH`, which is already the case when you run Claude Code from a terminal.
 
+### Codex
+
+The MCP server and the skill are host-neutral, so the same plugin works in the [Codex CLI](https://github.com/openai/codex). Clone the repo, register the server and link the skill:
+
+```bash
+git clone https://github.com/sigcrew/claude-plugin.git ~/sigcrew-plugins
+codex mcp add table_review -- uv run --directory ~/sigcrew-plugins/plugins/table-review/mcp-server server.py
+ln -s ~/sigcrew-plugins/plugins/table-review/skills/review ~/.codex/skills/table-review
+```
+
+Codex asks for approval on every MCP tool call by default, which also interrupts `wait_review`; to let the review run without prompts add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.table_review]
+default_tools_approval_mode = "approve"
+```
+
+Tools appear as `table_review.start_review` etc. Quick answers use `claude` when it is on `PATH` and fall back to `codex exec` (read-only sandbox, no session file) otherwise; set `TABLE_REVIEW_MODEL` to pick the model for either. Deep investigation uses Codex subagents when the session has them, otherwise it runs inline.
+
 ## Use
 
-Say "review this", "검토해줘", or run `/table-review:review <file>`. A browser tab opens and Claude also prints the page address, in case the tab did not come to the front.
+Say "테이블 리뷰", "table review this", or run `/table-review:review <file>`. A browser tab opens and Claude also prints the page address, in case the tab did not come to the front.
 
 A file on disk opens in seconds, because the server reads it directly. Text that exists only in the conversation takes longer, since Claude has to write it out again: about a minute for 10,000 characters.
 
@@ -28,7 +47,7 @@ A file on disk opens in seconds, because the server reads it directly. Text that
 | `1` | Comment on the selection |
 | `2` | Ask a question, answered in the card within seconds |
 | `3` | Request a change |
-| `4` | Approve: saves the comment `제안 승인` on the selection without opening a card |
+| `4` | Approve: saves the comment `제안 승인` on the selection without opening a card; a second approval of the same rows is ignored |
 | `5` | Suggest: edit the row text in place; the card shows a word diff and Claude gets both versions |
 | `↑` `↓` (or `k` `j`) | Move the selection one row; with Shift, extend it |
 | Space | Mark the selected rows as read (✓); the header counts them |
@@ -65,9 +84,9 @@ The theme follows the system setting. Drag the dividers to resize the sidebar an
 | Env var | Default | Meaning |
 |---------|---------|---------|
 | `TABLE_REVIEW_TIMEOUT` | `0` | Seconds to wait for the browser before giving up. `0` waits forever. |
-| `TABLE_REVIEW_MODEL` | `sonnet` | Model for quick answers. |
+| `TABLE_REVIEW_MODEL` | `sonnet` (claude) / Codex default | Model for quick answers. |
 | `TABLE_REVIEW_QUICK_TIMEOUT` | `60` | Seconds before a quick answer gives up and the question goes to deep investigation. |
-| `TABLE_REVIEW_CLAUDE_CMD` | `claude` | Command used for quick answers. Use an absolute path. |
+| `TABLE_REVIEW_CLAUDE_CMD` | `claude`, else `codex` | Command used for quick answers (claude CLI flags are appended). Use an absolute path. |
 | `TABLE_REVIEW_CONTEXT_WAIT` | `45` | Seconds a question waits for Claude's background summary before it is answered without it. |
 | `TABLE_REVIEW_BROWSER` | platform opener | Command that opens the page. The address is appended. Defaults to `open` (macOS), `xdg-open` (Linux), `start` (Windows). The `BROWSER` variable is ignored. |
 | `TABLE_REVIEW_NO_BROWSER` | unset | Set to `1` to skip opening the browser (tests). |

@@ -1,7 +1,7 @@
 ---
 name: review
 description: |
-  Open a browser review UI for a plan or markdown document, where the user clicks table rows (or selects text) to leave comments, ask questions that get answered live, or request changes. Use whenever the user wants to review, check, or give feedback on something you wrote or on a file: "review this", "check this plan", "let me review", "/review", "리뷰", "검토해줘", "피드백 줄게", "이 파일 리뷰해줘: path/to/file.md". Prefer this over asking for feedback in the terminal when the content is longer than a few lines, because the user can point at the exact row they mean. When you draft a plan or document the user is likely to review, save it to a file with Write instead of printing it in the conversation, show a short summary, and open the review from that file: the page opens in about a second from a file, while text passed inline has to be written out again as tool arguments, which took 42 seconds for a 6,500 character plan.
+  Open a browser review UI for a plan or markdown document, where the user clicks table rows (or selects text) to leave comments, ask questions that get answered live, or request changes. Use ONLY when the user explicitly asks for a table review by name: "테이블 리뷰", "테이블리뷰", "table review", "table-review", or the /table-review:review command, e.g. "테이블 리뷰로 볼게", "table review this plan", "이 파일 테이블리뷰: path/to/file.md". A plain "review this", "리뷰", "검토해줘", "피드백" without those words is NOT a trigger; answer those in the conversation as usual. Once a table review is requested: if you are drafting the document, save it to a file with Write instead of printing it, show a short summary, and open the review from that file (the page opens in about a second from a file, while text passed inline is written out again as tool arguments, which took 42 seconds for a 6,500 character plan).
 allowed-tools:
   - mcp__plugin_table-review_table_review__start_review
   - mcp__plugin_table-review_table_review__wait_review
@@ -93,7 +93,7 @@ A `question` result means the user wants more than the quick answer gave. Each q
 
 `reason` is `requested` when the user pressed the button, and `quick_failed` when the quick call could not run and the question came to you instead. In that case `quick_answer` is empty. `thread` holds the earlier questions and answers when this is a follow-up asked under another question, as `[{"question", "answer"}, ...]` in order; give it to the subagent too, since the question only makes sense after them.
 
-Investigate with a subagent (`Agent` tool) rather than inline. The user is waiting in the browser, and a subagent keeps file reads and searches out of this conversation's context. When several questions arrive together, spawn their subagents in one message so they run in parallel.
+Investigate with a subagent (the `Agent` tool in Claude Code, or whatever your harness offers) rather than inline. The user is waiting in the browser, and a subagent keeps file reads and searches out of this conversation's context. When several questions arrive together, spawn their subagents in one message so they run in parallel. Without subagents, investigate inline but keep it short: answer from what the files say, not from a full audit.
 
 Give the subagent what it cannot know on its own:
 

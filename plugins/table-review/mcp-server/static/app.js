@@ -494,7 +494,10 @@ function moveSelection(dir, extend) {
 
 // Status icon: scroll to the first card of that type on the row and flash every such card.
 function focusCards(i, type) {
-  const ids = new Set(items.filter((it) => it.type === type && it.rows.some((r) => r.index === i + 1)).map((it) => it.id));
+  flashCards(items.filter((it) => it.type === type && it.rows.some((r) => r.index === i + 1)).map((it) => it.id));
+}
+function flashCards(idList) {
+  const ids = new Set(idList);
   const cards = [...$('sidebar').querySelectorAll('.card[data-id]')].filter((c) => ids.has(c.dataset.id));
   const seen = new Set();  // questions and comments scroll separately: bring the first card of each into view
   for (const c of cards) {
@@ -616,9 +619,22 @@ function saveEditing(ta) {
   saveItem(text);
 }
 
+// Same kind, same target, same text: the card already exists (e.g. pressing 4 twice), so just point at it.
+function duplicateOf(item) {
+  const key = (it) => [it.type, it.parent || '', it.selectedText, it.rows.map((r) => r.index).join(','), it.text.trim()].join('\x1f');
+  return items.find((it) => key(it) === key(item));
+}
+
 function saveItem(text, keepSelection = false) {
   const { range, ...item } = editing;
   item.text = text;
+  const dup = duplicateOf(item);
+  if (dup) {
+    discardEditing();
+    if (!keepSelection) clearSelection();
+    flashCards([dup.id]);
+    return;
+  }
   if (range) {
     try {
       const mark = document.createElement('mark');
